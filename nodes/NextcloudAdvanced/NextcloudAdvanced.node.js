@@ -62,7 +62,10 @@ function parseWebDavXml(xml, webDavUrl) {
 function propfind(webDavUrl, path, user, password, depth) {
 	return new Promise((resolve, reject) => {
 		const base = new URL(webDavUrl);
-		const requestPath = base.pathname.replace(/\/$/, '') + (path === '/' ? '' : path);
+		const encodedPath = path === '/'
+			? ''
+			: path.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+		const requestPath = base.pathname.replace(/\/$/, '') + encodedPath;
 
 		const body = `<?xml version="1.0" encoding="UTF-8"?>
 <D:propfind xmlns:D="DAV:" xmlns:oc="http://owncloud.org/ns">
