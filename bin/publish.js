@@ -28,6 +28,6 @@ publish(
             patchTypes: ['perf', 'fix'],
             breakingNoteKeywords: BREAKING_KEYWORDS,
         }),
-        npm({ provenance: true, trustedPublishing: false }),
+        npm({ provenance: true, trustedPublishing: true }),
     ]
 )
