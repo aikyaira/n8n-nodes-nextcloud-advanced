@@ -24,6 +24,9 @@
   "scripts": {
     "test": "echo \"No tests yet\""
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "n8n": {
     "n8nNodesApiVersion": 1,
     "credentials": [],
