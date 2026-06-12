@@ -1,0 +1,41 @@
+{
+  "name": "n8n-nodes-nextcloud-advanced",
+  "version": "0.0.0-development",
+  "description": "n8n community node for advanced Nextcloud operations (recursive file listing, etc.)",
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/open-condo-software/n8n-nodes-nextcloud-advanced",
+  "author": {
+    "name": "Matthew Savelev",
+    "email": "matthew@doma.ai",
+    "url": "https://github.com/SavelevMatthew"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/open-condo-software/n8n-nodes-nextcloud-advanced"
+  },
+  "files": [
+    "index.js",
+    "nodes/**/*.js"
+  ],
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No tests yet\""
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [],
+    "nodes": [
+      "nodes/NextcloudAdvanced/NextcloudAdvanced.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@mono-pub/commit-analyzer": "^1.0.10",
+    "@mono-pub/git": "^1.0.10",
+    "@mono-pub/github": "^1.0.10",
+    "@mono-pub/npm": "^1.1.0",
+    "mono-pub": "^2.2.1"
+  }
+}
