@@ -1,0 +1,11 @@
+{
+  "node": "n8n-nodes-nextcloud-advanced.excelMultiSheetEditor",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["Data & Storage", "Productivity"],
+  "resources": {
+    "credentialDocumentation": [],
+    "primaryDocumentation": []
+  },
+  "alias": ["excel", "spreadsheet", "xlsx"]
+}

@@ -23,16 +23,18 @@
   ],
   "main": "index.js",
   "scripts": {
-    "test": "echo \"No tests yet\""
+    "build": "tsc",
+    "test": "echo \"No tests yet\"",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build"
   },
   "publishConfig": {
     "access": "public"
   },
   "n8n": {
-    "n8nNodesApiVersion": 1,
-    "credentials": [],
     "nodes": [
-      "nodes/NextcloudAdvanced/NextcloudAdvanced.node.js"
+      "dist/nodes/Nextcloud/Nextcloud.node.js",
+      "dist/nodes/ExcelMultiSheetEditor/ExcelMultiSheetEditor.node.js"
     ]
   },
   "devDependencies": {
@@ -40,6 +42,12 @@
     "@mono-pub/git": "^1.0.10",
     "@mono-pub/github": "^1.0.10",
     "@mono-pub/npm": "^1.1.0",
-    "mono-pub": "^2.2.1"
+    "@types/node": "^26.1.1",
+    "mono-pub": "^2.2.1",
+    "n8n-workflow": "^2.16.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }
