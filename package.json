@@ -17,9 +17,10 @@
     "url": "https://github.com/open-condo-software/n8n-nodes-nextcloud-advanced"
   },
   "files": [
-    "index.js",
-    "nodes/**/*.js",
-    "nodes/**/*.svg"
+  "index.js",
+  "nodes/**/*.js",
+  "nodes/**/*.svg",
+  "nodes/**/*.json"
   ],
   "main": "index.js",
   "scripts": {
@@ -32,10 +33,10 @@
     "access": "public"
   },
   "n8n": {
-    "nodes": [
-      "dist/nodes/Nextcloud/Nextcloud.node.js",
-      "dist/nodes/ExcelMultiSheetEditor/ExcelMultiSheetEditor.node.js"
-    ]
+  "nodes": [
+    "nodes/NextcloudAdvanced/NextcloudAdvanced.node.js",
+    "nodes/ExcelMultiSheetEditor/ExcelMultiSheetEditor.node.js"
+   ]
   },
   "devDependencies": {
     "@mono-pub/commit-analyzer": "^1.0.10",
