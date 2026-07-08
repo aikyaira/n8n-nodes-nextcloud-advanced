@@ -1,42 +1,41 @@
 {
   "name": "n8n-nodes-nextcloud-advanced",
-  "version": "0.0.0-development",
-  "description": "n8n community node for advanced Nextcloud operations (recursive file listing, etc.)",
+  "version": "1.0.0",
+  "description": "n8n community node for Excel multi-sheet editing",
   "keywords": [
-    "n8n-community-node-package"
+    "n8n-community-node-package",
+    "excel",
+    "spreadsheet",
+    "xlsx"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/open-condo-software/n8n-nodes-nextcloud-advanced",
+  "homepage": "https://github.com/aikyaira/n8n-nodes-nextcloud-advanced",
   "author": {
-    "name": "Matthew Savelev",
-    "email": "matthew@doma.ai",
-    "url": "https://github.com/SavelevMatthew"
+    "name": "Alina Kovrizhkina",
+    "email": "aikyaira@gmail.com"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/open-condo-software/n8n-nodes-nextcloud-advanced"
+    "url": "https://github.com/aikyaira/n8n-nodes-nextcloud-advanced"
   },
   "files": [
-  "index.js",
-  "nodes/**/*.js",
-  "nodes/**/*.svg",
-  "nodes/**/*.json"
+    "index.js",
+    "nodes/**/*.js",
+    "nodes/**/*.svg",
+    "nodes/**/*.json"
   ],
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
-    "test": "echo \"No tests yet\"",
-    "watch": "tsc --watch",
-    "prepublishOnly": "npm run build"
+    "test": "echo \"No tests yet\""
   },
   "publishConfig": {
     "access": "public"
   },
   "n8n": {
-  "nodes": [
-    "nodes/NextcloudAdvanced/NextcloudAdvanced.node.js",
-    "nodes/ExcelMultiSheetEditor/ExcelMultiSheetEditor.node.js"
-   ]
+    "nodes": [
+      "nodes/NextcloudAdvanced/NextcloudAdvanced.node.js",
+      "nodes/ExcelMultiSheetEditor/ExcelMultiSheetEditor.node.js"
+    ]
   },
   "devDependencies": {
     "@mono-pub/commit-analyzer": "^1.0.10",
