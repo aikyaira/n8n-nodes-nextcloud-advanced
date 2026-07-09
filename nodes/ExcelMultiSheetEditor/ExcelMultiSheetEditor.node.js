@@ -1,6 +1,6 @@
 'use strict';
 
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
 class ExcelMultiSheetEditor {
   constructor() {
@@ -8,8 +8,8 @@ class ExcelMultiSheetEditor {
       displayName: 'Excel Multi-Sheet Editor',
       name: 'excelMultiSheetEditor',
       group: ['transform'],
-      version: 1,
-      description: 'Edit multi-sheet Excel files - add rows individually and by ranges',
+      version: 2,
+      description: 'Edit multi-sheet Excel files with full style preservation',
       defaults: {
         name: 'Excel Multi-Sheet Editor',
       },
@@ -46,7 +46,7 @@ class ExcelMultiSheetEditor {
           type: 'string',
           default: '',
           placeholder: 'Leave empty to keep original name',
-          description: 'Custom file name for the output Excel file. Leave empty to keep original name.',
+          description: 'Custom file name for the output Excel file',
         },
         {
           displayName: 'Start Cell',
@@ -85,7 +85,6 @@ class ExcelMultiSheetEditor {
           type: 'string',
           default: '',
           placeholder: 'e.g. A,B,C or 1,2,3',
-          description: 'Optional: columns to write to. Empty = auto.',
         },
         {
           displayName: 'Options',
@@ -163,108 +162,77 @@ class ExcelMultiSheetEditor {
           return [row];
         });
 
-        // Load workbook
-        let workbook;
+        // Load workbook with ExcelJS (preserves ALL styles)
+        const workbook = new ExcelJS.Workbook();
         let originalFileName = 'workbook.xlsx';
         const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i);
 
         if (items[i].binary && binaryPropertyName && items[i].binary[binaryPropertyName]) {
           const binaryData = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
-          workbook = XLSX.read(binaryData, { type: 'buffer' });
-          // 🔧 Get original filename
+          await workbook.xlsx.load(binaryData);
+          
           if (items[i].binary[binaryPropertyName].fileName) {
             originalFileName = items[i].binary[binaryPropertyName].fileName;
           }
         } else {
-          workbook = XLSX.utils.book_new();
+          workbook.addWorksheet('Sheet1');
         }
 
         // Get or create worksheet
-        let worksheet = workbook.Sheets[sheetName];
+        let worksheet = workbook.getWorksheet(sheetName);
         if (!worksheet) {
-          worksheet = XLSX.utils.aoa_to_sheet([[]]);
-          XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+          worksheet = workbook.addWorksheet(sheetName);
         }
 
-        // 🔧 Get current data range
-        const currentData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-        
         // Determine start position
-        let startRow = currentData.length;
-        let startCol = 0;
+        let startRow;
+        let startCol = 1; // ExcelJS uses 1-based indexing
 
-        if (options.appendEmptyRow && startRow > 0) {
-          const lastRow = currentData[startRow - 1];
-          if (lastRow.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
-            startRow++;
+        if (operation === 'addRows') {
+          startRow = worksheet.rowCount + 1;
+          
+          if (options.appendEmptyRow && worksheet.rowCount > 0) {
+            const lastRow = worksheet.getRow(worksheet.rowCount);
+            const hasContent = Array.isArray(lastRow.values) && 
+              lastRow.values.some(v => v !== null && v !== undefined && v !== '');
+            if (hasContent) startRow++;
           }
-        }
-
-        if (operation === 'addRange') {
+        } else {
           const startCell = this.getNodeParameter('startCell', i);
-          const startRef = XLSX.utils.decode_cell(startCell);
-          startRow = startRef.r;
-          startCol = startRef.c;
+          const parsed = parseCellRef(startCell);
+          startRow = parsed.row;
+          startCol = parsed.col;
         }
 
-        // 🔧 WRITE DIRECTLY TO CELLS - preserves existing cells
-        let maxColUsed = startCol;
-        let maxRowUsed = startRow;
-
+        // 🔧 ADD DATA - ExcelJS preserves all existing cell styles
         for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
           const row = dataToInsert[rowIdx];
+          const targetRow = worksheet.getRow(startRow + rowIdx);
           
           for (let colIdx = 0; colIdx < row.length; colIdx++) {
             const targetCol = targetColumns.length > 0 && colIdx < targetColumns.length
-              ? parseColumnIndex(targetColumns[colIdx])
+              ? parseColumnIndex(targetColumns[colIdx]) + 1 // ExcelJS 1-based
               : startCol + colIdx;
 
-            const cellRef = XLSX.utils.encode_cell({ r: startRow + rowIdx, c: targetCol });
-            
-            // Check overwrite
+            // Check overwrite for range
             if (operation === 'addRange' && !options.overwrite) {
-              const existingCell = worksheet[cellRef];
-              if (existingCell && existingCell.v !== undefined && existingCell.v !== '') continue;
+              const existingCell = targetRow.getCell(targetCol);
+              if (existingCell.value !== null && existingCell.value !== undefined && existingCell.value !== '') {
+                continue;
+              }
             }
 
-            // Write new value - 🔧 keep existing formatting if cell exists
-            const value = row[colIdx];
-            const existingCell = worksheet[cellRef];
-            
-            worksheet[cellRef] = {
-              v: value,
-              t: typeof value === 'number' ? 'n' : 's',
-            };
-
-            // 🔧 Preserve existing cell style
-            if (existingCell && existingCell.s) {
-              worksheet[cellRef].s = existingCell.s;
-            }
-            if (existingCell && existingCell.z) {
-              worksheet[cellRef].z = existingCell.z;
-            }
-
-            if (targetCol > maxColUsed) maxColUsed = targetCol;
-            if (startRow + rowIdx > maxRowUsed) maxRowUsed = startRow + rowIdx;
+            // 🔧 Set value - ExcelJS keeps existing cell style automatically
+            targetRow.getCell(targetCol).value = row[colIdx];
           }
+
+          targetRow.commit();
         }
 
-        // Update range
-        const oldRange = worksheet['!ref'] 
-          ? XLSX.utils.decode_range(worksheet['!ref']) 
-          : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-        
-        worksheet['!ref'] = XLSX.utils.encode_range({
-          s: { r: Math.min(oldRange.s.r, startRow), c: Math.min(oldRange.s.c, startCol) },
-          e: { r: Math.max(oldRange.e.r, maxRowUsed), c: Math.max(oldRange.e.c, maxColUsed) },
-        });
-
-        workbook.Sheets[sheetName] = worksheet;
-
         // Write to buffer
-        const wbout = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        const buffer = await workbook.xlsx.writeBuffer();
 
-        // 🔧 Determine output filename
+        // Determine output filename
         const finalFileName = outputFileName 
           ? (outputFileName.endsWith('.xlsx') ? outputFileName : `${outputFileName}.xlsx`)
           : originalFileName;
@@ -277,14 +245,14 @@ class ExcelMultiSheetEditor {
             excelOperation: operation,
             sheetModified: sheetName,
             rowsAffected: dataToInsert.length,
-            sheetNames: workbook.SheetNames,
+            sheetNames: workbook.worksheets.map(ws => ws.name),
             outputFileName: finalFileName,
           },
           binary: {},
         };
 
         newItem.binary[outputBinaryField] = await this.helpers.prepareBinaryData(
-          wbout,
+          Buffer.from(buffer),
           finalFileName,
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         );
@@ -304,6 +272,18 @@ class ExcelMultiSheetEditor {
 
     return [returnData];
   }
+}
+
+// Parse cell reference like "A1" or "B5"
+function parseCellRef(cellRef) {
+  const match = cellRef.match(/^([A-Z]+)(\d+)$/i);
+  if (match) {
+    return {
+      col: parseColumnIndex(match[1]) + 1, // ExcelJS 1-based
+      row: parseInt(match[2]),
+    };
+  }
+  return { col: 1, row: 1 };
 }
 
 function parseColumnIndex(col) {
