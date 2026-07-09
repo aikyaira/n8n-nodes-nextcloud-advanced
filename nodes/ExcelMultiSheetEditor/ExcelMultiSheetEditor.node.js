@@ -21,26 +21,16 @@ class ExcelMultiSheetEditor {
           name: 'operation',
           type: 'options',
           options: [
-            {
-              name: 'Add Rows to End',
-              value: 'addRows',
-              description: 'Add rows to the end of a sheet',
-            },
-            {
-              name: 'Add Range at Position',
-              value: 'addRange',
-              description: 'Add data in a specific range/cell position',
-            },
+            { name: 'Add Rows to End', value: 'addRows' },
+            { name: 'Add Range at Position', value: 'addRange' },
           ],
           default: 'addRows',
-          description: 'The operation to perform',
         },
         {
           displayName: 'Input Binary Field',
           name: 'binaryPropertyName',
           type: 'string',
           default: 'data',
-          description: 'Name of the binary property containing the Excel file. Leave empty to create new file.',
         },
         {
           displayName: 'Sheet Name',
@@ -50,62 +40,38 @@ class ExcelMultiSheetEditor {
             loadOptionsMethod: 'getSheetNames',
           },
           default: '',
-          description: 'Choose an existing sheet or type a new name to create one',
+          description: 'Choose sheet or leave empty for first sheet. Type custom name to create new.',
         },
         {
           displayName: 'Start Cell',
           name: 'startCell',
           type: 'string',
           default: 'A1',
-          displayOptions: {
-            show: {
-              operation: ['addRange'],
-            },
-          },
-          description: 'Starting cell for range insertion (e.g., A1, B5, C10)',
+          displayOptions: { show: { operation: ['addRange'] } },
         },
         {
           displayName: 'Data Format',
           name: 'dataFormat',
           type: 'options',
           options: [
-            {
-              name: 'Define Below',
-              value: 'defineBelow',
-              description: 'Define data in the node parameters',
-            },
-            {
-              name: 'From JSON Property',
-              value: 'fromJson',
-              description: 'Take data from an incoming JSON property',
-            },
+            { name: 'Define Below', value: 'defineBelow' },
+            { name: 'From JSON Property', value: 'fromJson' },
           ],
           default: 'defineBelow',
-          description: 'Where the data to insert comes from',
         },
         {
           displayName: 'JSON Data Property',
           name: 'jsonDataProperty',
           type: 'string',
           default: 'excelData',
-          displayOptions: {
-            show: {
-              dataFormat: ['fromJson'],
-            },
-          },
-          description: 'Name of the property which contains the data to insert',
+          displayOptions: { show: { dataFormat: ['fromJson'] } },
         },
         {
           displayName: 'Data to Add',
           name: 'dataToAdd',
           type: 'json',
           default: '[\n  ["Name", "Age", "City"],\n  ["John", 30, "New York"],\n  ["Jane", 25, "London"]\n]',
-          displayOptions: {
-            show: {
-              dataFormat: ['defineBelow'],
-            },
-          },
-          description: 'Array of arrays representing the data to add. Each inner array is a row.',
+          displayOptions: { show: { dataFormat: ['defineBelow'] } },
         },
         {
           displayName: 'Target Columns',
@@ -113,7 +79,7 @@ class ExcelMultiSheetEditor {
           type: 'string',
           default: '',
           placeholder: 'e.g. A,B,C or 1,2,3',
-          description: 'Optional: Specify columns to write to. Leave empty to start from column A.',
+          description: 'Optional: columns to write to. Empty = auto.',
         },
         {
           displayName: 'Options',
@@ -127,31 +93,20 @@ class ExcelMultiSheetEditor {
               name: 'overwrite',
               type: 'boolean',
               default: false,
-              displayOptions: {
-                show: {
-                  '/operation': ['addRange'],
-                },
-              },
-              description: 'Whether to overwrite existing data in the range',
+              displayOptions: { show: { '/operation': ['addRange'] } },
             },
             {
               displayName: 'Add Empty Row Before',
               name: 'appendEmptyRow',
               type: 'boolean',
               default: false,
-              displayOptions: {
-                show: {
-                  '/operation': ['addRows'],
-                },
-              },
-              description: 'Add an empty row before new data',
+              displayOptions: { show: { '/operation': ['addRows'] } },
             },
             {
               displayName: 'Output Binary Field',
               name: 'outputBinaryField',
               type: 'string',
               default: 'data',
-              description: 'Name of the binary field to output',
             },
           ],
         },
@@ -162,32 +117,11 @@ class ExcelMultiSheetEditor {
   methods = {
     loadOptions: {
       async getSheetNames() {
-        const items = this.getInputData();
-        
-        if (!items || items.length === 0) {
-          return [{ name: 'Sheet1', value: 'Sheet1' }];
-        }
-
-        try {
-          const binaryPropertyName = this.getNodeParameter('binaryPropertyName', 0);
-          
-          if (items[0].binary && items[0].binary[binaryPropertyName]) {
-            const binaryData = await this.helpers.getBinaryDataBuffer(0, binaryPropertyName);
-            const workbook = XLSX.read(binaryData, { type: 'buffer' });
-            
-            if (workbook.SheetNames && workbook.SheetNames.length > 0) {
-              return workbook.SheetNames.map(name => ({
-                name: name,
-                value: name,
-              }));
-            }
-          }
-        } catch (error) {
-          // Silently fall back to defaults
-        }
-
         return [
+          { name: '[First sheet / Create new]', value: '' },
           { name: 'Sheet1', value: 'Sheet1' },
+          { name: 'Sheet2', value: 'Sheet2' },
+          { name: 'Sheet3', value: 'Sheet3' },
         ];
       },
     },
@@ -200,7 +134,6 @@ class ExcelMultiSheetEditor {
     for (let i = 0; i < items.length; i++) {
       try {
         const operation = this.getNodeParameter('operation', i);
-        const sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
         const dataFormat = this.getNodeParameter('dataFormat', i);
         const targetColumnsStr = this.getNodeParameter('targetColumns', i);
         const options = this.getNodeParameter('options', i, {});
@@ -208,10 +141,10 @@ class ExcelMultiSheetEditor {
         // Parse target columns
         let targetColumns = [];
         if (targetColumnsStr && targetColumnsStr.trim()) {
-          targetColumns = targetColumnsStr.split(',').map(col => col.trim().toUpperCase());
+          targetColumns = targetColumnsStr.split(',').map(c => c.trim().toUpperCase());
         }
 
-        // Get data to insert
+        // Get data
         let dataToInsert;
         if (dataFormat === 'defineBelow') {
           dataToInsert = this.getNodeParameter('dataToAdd', i);
@@ -220,28 +153,22 @@ class ExcelMultiSheetEditor {
           dataToInsert = items[i].json[jsonProperty];
         }
 
-        // Parse JSON string if needed
         if (typeof dataToInsert === 'string') {
-          try {
-            dataToInsert = JSON.parse(dataToInsert);
-          } catch (parseError) {
-            throw new Error(`Failed to parse data as JSON. Error: ${parseError.message}`);
-          }
+          try { dataToInsert = JSON.parse(dataToInsert); }
+          catch (e) { throw new Error(`Invalid JSON: ${e.message}`); }
         }
 
-        // Validate
         if (!Array.isArray(dataToInsert)) {
-          throw new Error(`Data must be an array. Received: ${typeof dataToInsert}`);
+          throw new Error(`Data must be array, got ${typeof dataToInsert}`);
         }
 
-        // Normalize
-        dataToInsert = dataToInsert.map((row, index) => {
+        dataToInsert = dataToInsert.map(row => {
           if (Array.isArray(row)) return row;
           if (typeof row === 'object' && row !== null) return Object.values(row);
           return [row];
         });
 
-        // Load or create workbook - 🔧 WITHOUT cellStyles
+        // Load workbook
         let workbook;
         const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i);
 
@@ -252,6 +179,14 @@ class ExcelMultiSheetEditor {
           workbook = XLSX.utils.book_new();
         }
 
+        // Determine sheet name
+        let sheetName = this.getNodeParameter('sheetName', i) || '';
+        if (!sheetName && workbook.SheetNames.length > 0) {
+          sheetName = workbook.SheetNames[0];
+        } else if (!sheetName) {
+          sheetName = 'Sheet1';
+        }
+
         // Get or create worksheet
         let worksheet = workbook.Sheets[sheetName];
         if (!worksheet) {
@@ -259,41 +194,83 @@ class ExcelMultiSheetEditor {
           XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
         }
 
-        // 🔧 Save original cell properties (styles, formatting)
+        // Get current data range
+        const currentData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        
+        // 🔧 PRESERVE STYLES: Save original cell objects
         const originalCells = {};
-        Object.keys(worksheet).forEach(cellRef => {
-          if (cellRef.startsWith('!')) return;
-          originalCells[cellRef] = { ...worksheet[cellRef] };
+        Object.keys(worksheet).forEach(ref => {
+          if (!ref.startsWith('!')) {
+            originalCells[ref] = JSON.parse(JSON.stringify(worksheet[ref]));
+          }
         });
 
-        // Perform operation
-        if (operation === 'addRows') {
-          addRowsToEnd(worksheet, dataToInsert, options.appendEmptyRow, targetColumns);
-        } else if (operation === 'addRange') {
-          const startCell = this.getNodeParameter('startCell', i);
-          addRange(worksheet, startCell, dataToInsert, options.overwrite, targetColumns);
+        // Determine start row
+        let startRow = currentData.length;
+        let startCol = 0;
+
+        if (options.appendEmptyRow && startRow > 0) {
+          const lastRow = currentData[startRow - 1];
+          if (lastRow.some(c => c !== '' && c !== null && c !== undefined)) {
+            startRow++;
+          }
         }
 
-        // 🔧 Restore original cells that weren't modified
-        Object.keys(originalCells).forEach(cellRef => {
-          if (!worksheet[cellRef]) {
-            worksheet[cellRef] = originalCells[cellRef];
-          } else if (worksheet[cellRef].v === undefined || worksheet[cellRef].v === '') {
-            worksheet[cellRef] = originalCells[cellRef];
-          } else {
-            // Keep new value but restore original formatting if any
-            if (originalCells[cellRef].s && !worksheet[cellRef].s) {
-              worksheet[cellRef].s = originalCells[cellRef].s;
+        if (operation === 'addRange') {
+          const startCell = this.getNodeParameter('startCell', i);
+          const startRef = XLSX.utils.decode_cell(startCell);
+          startRow = startRef.r;
+          startCol = startRef.c;
+        }
+
+        // 🔧 ADD DATA DIRECTLY to cells (preserves other cells' styles)
+        for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
+          const row = dataToInsert[rowIdx];
+          for (let colIdx = 0; colIdx < row.length; colIdx++) {
+            const col = targetColumns.length > 0 && colIdx < targetColumns.length
+              ? parseColumnIndex(targetColumns[colIdx])
+              : startCol + colIdx;
+
+            const cellRef = XLSX.utils.encode_cell({ r: startRow + rowIdx, c: col });
+            
+            // Check overwrite
+            if (operation === 'addRange' && !options.overwrite) {
+              const existing = worksheet[cellRef];
+              if (existing && existing.v !== undefined && existing.v !== '') continue;
             }
-            if (originalCells[cellRef].z && !worksheet[cellRef].z) {
-              worksheet[cellRef].z = originalCells[cellRef].z;
-            }
+
+            // 🔧 Create new cell value
+            const value = row[colIdx];
+            worksheet[cellRef] = {
+              v: value,
+              t: typeof value === 'number' ? 'n' : 's',
+            };
           }
+        }
+
+        // 🔧 RESTORE ORIGINAL CELLS that we didn't modify (preserves their styles)
+        Object.keys(originalCells).forEach(ref => {
+          if (!worksheet[ref]) {
+            worksheet[ref] = originalCells[ref];
+          }
+        });
+
+        // Update range
+        const maxRow = startRow + dataToInsert.length - 1;
+        const maxCol = targetColumns.length > 0
+          ? Math.max(...targetColumns.map(c => parseColumnIndex(c)))
+          : startCol + Math.max(...dataToInsert.map(r => r.length)) - 1;
+
+        const oldRange = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+        
+        worksheet['!ref'] = XLSX.utils.encode_range({
+          s: { r: Math.min(oldRange.s.r, startRow), c: Math.min(oldRange.s.c, startCol) },
+          e: { r: Math.max(oldRange.e.r, maxRow), c: Math.max(oldRange.e.c, maxCol) },
         });
 
         workbook.Sheets[sheetName] = worksheet;
 
-        // Write WITHOUT cellStyles
+        // Write
         const wbout = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
         const outputBinaryField = options.outputBinaryField || binaryPropertyName || 'data';
@@ -303,7 +280,6 @@ class ExcelMultiSheetEditor {
             excelOperation: operation,
             sheetModified: sheetName,
             rowsAffected: dataToInsert.length,
-            totalSheets: workbook.SheetNames.length,
             sheetNames: workbook.SheetNames,
           },
           binary: {},
@@ -317,11 +293,9 @@ class ExcelMultiSheetEditor {
 
         returnData.push(newItem);
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const msg = error instanceof Error ? error.message : 'Unknown error';
         if (this.continueOnFail()) {
-          returnData.push({
-            json: { error: errorMessage, ...items[i].json },
-          });
+          returnData.push({ json: { error: msg, ...items[i].json } });
           continue;
         }
         throw error;
@@ -332,92 +306,13 @@ class ExcelMultiSheetEditor {
   }
 }
 
-// Helper functions
-
 function parseColumnIndex(col) {
-  if (typeof col === 'string' && /^[A-Z]+$/.test(col)) {
-    let index = 0;
-    for (let i = 0; i < col.length; i++) {
-      index = index * 26 + (col.charCodeAt(i) - 64);
-    }
-    return index - 1;
+  if (/^[A-Z]+$/.test(col)) {
+    let idx = 0;
+    for (let i = 0; i < col.length; i++) idx = idx * 26 + (col.charCodeAt(i) - 64);
+    return idx - 1;
   }
   return parseInt(col) - 1;
-}
-
-function addRowsToEnd(worksheet, dataToInsert, appendEmptyRow, targetColumns) {
-  const currentData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-  // Add empty row if needed
-  if (appendEmptyRow && currentData.length > 0) {
-    const lastRow = currentData[currentData.length - 1];
-    const hasContent = lastRow.some(cell => cell !== '' && cell !== null && cell !== undefined);
-    if (hasContent) currentData.push([]);
-  }
-
-  const startRow = currentData.length;
-
-  // Add new rows
-  dataToInsert.forEach((row, rowIndex) => {
-    const targetRow = startRow + rowIndex;
-    if (!currentData[targetRow]) currentData[targetRow] = [];
-
-    if (targetColumns && targetColumns.length > 0) {
-      targetColumns.forEach((col, colIndex) => {
-        const colNum = parseColumnIndex(col);
-        if (colIndex < row.length) {
-          currentData[targetRow][colNum] = row[colIndex];
-        }
-      });
-    } else {
-      currentData[targetRow] = [...currentData[targetRow], ...row];
-    }
-  });
-
-  // Rebuild sheet
-  const newWorksheet = XLSX.utils.aoa_to_sheet(currentData);
-  const newRange = newWorksheet['!ref'];
-  
-  Object.keys(worksheet).forEach(key => delete worksheet[key]);
-  Object.assign(worksheet, newWorksheet);
-  worksheet['!ref'] = newRange;
-}
-
-function addRange(worksheet, startCell, dataToInsert, overwrite, targetColumns) {
-  const startRef = XLSX.utils.decode_cell(startCell);
-  let maxCol = startRef.c;
-  let maxRow = startRef.r;
-
-  for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
-    const row = dataToInsert[rowIdx];
-    
-    for (let colIdx = 0; colIdx < row.length; colIdx++) {
-      const targetCol = targetColumns && colIdx < targetColumns.length
-        ? parseColumnIndex(targetColumns[colIdx])
-        : startRef.c + colIdx;
-
-      const cellRef = XLSX.utils.encode_cell({ r: startRef.r + rowIdx, c: targetCol });
-      const existing = worksheet[cellRef];
-
-      if (!overwrite && existing && existing.v !== undefined && existing.v !== '') continue;
-
-      worksheet[cellRef] = {
-        v: row[colIdx],
-        t: typeof row[colIdx] === 'number' ? 'n' : 's',
-        ...(existing && existing.s && { s: existing.s }),
-      };
-
-      if (targetCol > maxCol) maxCol = targetCol;
-      if (startRef.r + rowIdx > maxRow) maxRow = startRef.r + rowIdx;
-    }
-  }
-
-  const currentRef = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-  
-  worksheet['!ref'] = XLSX.utils.encode_range({
-    s: { r: Math.min(currentRef.s.r, startRef.r), c: Math.min(currentRef.s.c, startRef.c) },
-    e: { r: Math.max(currentRef.e.r, maxRow), c: Math.max(currentRef.e.c, maxCol) },
-  });
 }
 
 module.exports = { ExcelMultiSheetEditor };
