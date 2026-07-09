@@ -45,9 +45,12 @@ class ExcelMultiSheetEditor {
         {
           displayName: 'Sheet Name',
           name: 'sheetName',
-          type: 'string',
-          default: 'Sheet1',
-          description: 'Name of the sheet to edit. Will be created if it does not exist.',
+          type: 'options',
+          typeOptions: {
+            loadOptionsMethod: 'getSheetNames',
+          },
+          default: '',
+          description: 'Choose an existing sheet or type a new name to create one',
         },
         {
           displayName: 'Start Cell',
@@ -105,6 +108,14 @@ class ExcelMultiSheetEditor {
           description: 'Array of arrays representing the data to add. Each inner array is a row.',
         },
         {
+          displayName: 'Target Columns',
+          name: 'targetColumns',
+          type: 'string',
+          default: '',
+          placeholder: 'e.g. A,B,C or 1,2,3',
+          description: 'Optional: Specify columns to write to (e.g., "A,B,C" or "1,2,3"). Leave empty to write starting from the first available column.',
+        },
+        {
           displayName: 'Options',
           name: 'options',
           type: 'collection',
@@ -148,6 +159,36 @@ class ExcelMultiSheetEditor {
     };
   }
 
+  methods = {
+    loadOptions: {
+      // Get sheet names from input file
+      async getSheetNames() {
+        const binaryPropertyName = this.getNodeParameter('binaryPropertyName', 0);
+        const inputData = this.getInputData();
+
+        if (inputData.length === 0 || !inputData[0].binary || !inputData[0].binary[binaryPropertyName]) {
+          return [
+            { name: 'Sheet1', value: 'Sheet1' },
+          ];
+        }
+
+        try {
+          const binaryData = await this.helpers.getBinaryDataBuffer(0, binaryPropertyName);
+          const workbook = XLSX.read(binaryData, { type: 'buffer' });
+          
+          return workbook.SheetNames.map(name => ({
+            name: name,
+            value: name,
+          }));
+        } catch (error) {
+          return [
+            { name: 'Sheet1', value: 'Sheet1' },
+          ];
+        }
+      },
+    },
+  };
+
   async execute() {
     const items = this.getInputData();
     const returnData = [];
@@ -155,9 +196,16 @@ class ExcelMultiSheetEditor {
     for (let i = 0; i < items.length; i++) {
       try {
         const operation = this.getNodeParameter('operation', i);
-        const sheetName = this.getNodeParameter('sheetName', i);
+        const sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
         const dataFormat = this.getNodeParameter('dataFormat', i);
+        const targetColumnsStr = this.getNodeParameter('targetColumns', i);
         const options = this.getNodeParameter('options', i, {});
+
+        // Parse target columns
+        let targetColumns = [];
+        if (targetColumnsStr && targetColumnsStr.trim()) {
+          targetColumns = targetColumnsStr.split(',').map(col => col.trim());
+        }
 
         // Get data to insert
         let dataToInsert;
@@ -168,7 +216,7 @@ class ExcelMultiSheetEditor {
           dataToInsert = this.getNodeParameter(jsonProperty, i);
         }
 
-        // 🔧 FIX: Parse JSON string if needed (n8n passes JSON as string)
+        // Parse JSON string if needed
         if (typeof dataToInsert === 'string') {
           try {
             dataToInsert = JSON.parse(dataToInsert);
@@ -177,25 +225,31 @@ class ExcelMultiSheetEditor {
           }
         }
 
-        // 🔧 FIX: Better validation with detailed error
+        // Validate data
         if (!Array.isArray(dataToInsert)) {
-          throw new Error(`Data must be an array of arrays. Received type: ${typeof dataToInsert}. Value: ${JSON.stringify(dataToInsert).substring(0, 100)}`);
+          throw new Error(`Data must be an array of arrays. Received type: ${typeof dataToInsert}`);
         }
 
-        // Normalize data - convert objects to arrays if needed
+        // Normalize data
         dataToInsert = dataToInsert.map((row, index) => {
           if (Array.isArray(row)) return row;
           if (typeof row === 'object' && row !== null) return Object.values(row);
           throw new Error(`Row ${index} must be an array or object. Received: ${typeof row}`);
         });
 
-        // Load or create workbook
+        // Load or create workbook with cellStyles enabled
         let workbook;
         const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i);
 
         if (items[i].binary && binaryPropertyName && items[i].binary[binaryPropertyName]) {
           const binaryData = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
-          workbook = XLSX.read(binaryData, { type: 'buffer' });
+          // 🔧 FIX: Read with cellStyles to preserve formatting
+          workbook = XLSX.read(binaryData, { 
+            type: 'buffer',
+            cellStyles: true,
+            cellFormula: true,
+            cellDates: true,
+          });
         } else {
           workbook = XLSX.utils.book_new();
         }
@@ -209,17 +263,21 @@ class ExcelMultiSheetEditor {
 
         // Perform operation
         if (operation === 'addRows') {
-          addRowsToEnd(worksheet, dataToInsert, options.appendEmptyRow);
+          addRowsToEnd(worksheet, dataToInsert, options.appendEmptyRow, targetColumns);
         } else if (operation === 'addRange') {
           const startCell = this.getNodeParameter('startCell', i);
-          addRange(worksheet, startCell, dataToInsert, options.overwrite);
+          addRange(worksheet, startCell, dataToInsert, options.overwrite, targetColumns);
         }
 
         // Update workbook
         workbook.Sheets[sheetName] = worksheet;
 
-        // Write to buffer
-        const wbout = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        // 🔧 FIX: Write with cellStyles to preserve formatting
+        const wbout = XLSX.write(workbook, { 
+          type: 'buffer', 
+          bookType: 'xlsx',
+          cellStyles: true,
+        });
 
         // Prepare output
         const outputBinaryField = options.outputBinaryField || binaryPropertyName || 'data';
@@ -231,6 +289,7 @@ class ExcelMultiSheetEditor {
             rowsAffected: dataToInsert.length,
             totalSheets: workbook.SheetNames.length,
             sheetNames: workbook.SheetNames,
+            targetColumns: targetColumns.length > 0 ? targetColumns : 'auto',
           },
           binary: {},
         };
@@ -262,8 +321,33 @@ class ExcelMultiSheetEditor {
 }
 
 // Helper functions
-function addRowsToEnd(worksheet, dataToInsert, appendEmptyRow) {
+
+function parseColumnIndex(col) {
+  // If it's a letter (A, B, C, ...), convert to 0-based index
+  if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
+    col = col.toUpperCase();
+    let index = 0;
+    for (let i = 0; i < col.length; i++) {
+      index = index * 26 + (col.charCodeAt(i) - 64);
+    }
+    return index - 1; // 0-based
+  }
+  // If it's a number (1, 2, 3, ...), convert to 0-based
+  return parseInt(col) - 1;
+}
+
+function addRowsToEnd(worksheet, dataToInsert, appendEmptyRow, targetColumns) {
+  // Convert to array while preserving existing styles
   const currentData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+  
+  // Store original cell styles
+  const originalStyles = {};
+  Object.keys(worksheet).forEach(cellRef => {
+    if (cellRef.startsWith('!')) return;
+    if (worksheet[cellRef].s) {
+      originalStyles[cellRef] = worksheet[cellRef].s;
+    }
+  });
 
   if (appendEmptyRow && currentData.length > 0) {
     const lastRow = currentData[currentData.length - 1];
@@ -275,15 +359,48 @@ function addRowsToEnd(worksheet, dataToInsert, appendEmptyRow) {
     }
   }
 
-  const newData = [...currentData, ...dataToInsert];
-  const newWorksheet = XLSX.utils.aoa_to_sheet(newData);
+  // If target columns specified, map data to those columns
+  if (targetColumns && targetColumns.length > 0) {
+    const startRow = currentData.length;
+    targetColumns.forEach((col, colIndex) => {
+      const colNum = parseColumnIndex(col);
+      dataToInsert.forEach((row, rowIndex) => {
+        if (colIndex < row.length) {
+          currentData[startRow + rowIndex] = currentData[startRow + rowIndex] || [];
+          currentData[startRow + rowIndex][colNum] = row[colIndex];
+        }
+      });
+    });
+  } else {
+    // Just append all data
+    const newData = [...currentData, ...dataToInsert];
+    Object.keys(worksheet).forEach(key => delete worksheet[key]);
+    const newWorksheet = XLSX.utils.aoa_to_sheet(newData);
+    Object.assign(worksheet, newWorksheet);
+    
+    // Restore original styles
+    Object.keys(originalStyles).forEach(cellRef => {
+      if (worksheet[cellRef] && !worksheet[cellRef].s) {
+        worksheet[cellRef].s = originalStyles[cellRef];
+      }
+    });
+    return;
+  }
 
-  // Clear old worksheet and copy new data
+  // Rebuild worksheet with updated data
+  const newWorksheet = XLSX.utils.aoa_to_sheet(currentData);
   Object.keys(worksheet).forEach(key => delete worksheet[key]);
   Object.assign(worksheet, newWorksheet);
+
+  // Restore original styles
+  Object.keys(originalStyles).forEach(cellRef => {
+    if (worksheet[cellRef] && !worksheet[cellRef].s) {
+      worksheet[cellRef].s = originalStyles[cellRef];
+    }
+  });
 }
 
-function addRange(worksheet, startCell, dataToInsert, overwrite) {
+function addRange(worksheet, startCell, dataToInsert, overwrite, targetColumns) {
   const startCellRef = XLSX.utils.decode_cell(startCell);
 
   const currentRange = worksheet['!ref']
@@ -291,26 +408,43 @@ function addRange(worksheet, startCell, dataToInsert, overwrite) {
     : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
 
   let maxCol = 0;
+  let maxRow = 0;
+
   for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
     const row = dataToInsert[rowIdx];
-    for (let colIdx = 0; colIdx < row.length; colIdx++) {
+    const colsToUse = targetColumns && targetColumns.length > 0 ? targetColumns : row.map((_, idx) => idx);
+    
+    for (let colIdx = 0; colIdx < (targetColumns ? targetColumns.length : row.length); colIdx++) {
+      let targetCol;
+      if (targetColumns && targetColumns.length > 0) {
+        targetCol = parseColumnIndex(colsToUse[colIdx]);
+      } else {
+        targetCol = startCellRef.c + colIdx;
+      }
+
       const cellRef = XLSX.utils.encode_cell({
         r: startCellRef.r + rowIdx,
-        c: startCellRef.c + colIdx,
+        c: targetCol,
       });
 
       const existingCell = worksheet[cellRef];
 
+      // Skip if not overwriting and cell has content
       if (!overwrite && existingCell && existingCell.v !== undefined && existingCell.v !== '') {
         continue;
       }
 
+      // Preserve existing style if any
+      const existingStyle = existingCell && existingCell.s ? existingCell.s : {};
+
       worksheet[cellRef] = {
         v: row[colIdx],
         t: typeof row[colIdx] === 'number' ? 'n' : 's',
+        s: existingStyle, // 🔧 Preserve existing cell style
       };
 
-      maxCol = Math.max(maxCol, startCellRef.c + colIdx);
+      maxCol = Math.max(maxCol, targetCol);
+      maxRow = Math.max(maxRow, startCellRef.r + rowIdx);
     }
   }
 
@@ -320,7 +454,7 @@ function addRange(worksheet, startCell, dataToInsert, overwrite) {
       c: Math.min(currentRange.s.c, startCellRef.c),
     },
     e: {
-      r: Math.max(currentRange.e.r, startCellRef.r + dataToInsert.length - 1),
+      r: Math.max(currentRange.e.r, maxRow),
       c: Math.max(currentRange.e.c, maxCol),
     },
   };
