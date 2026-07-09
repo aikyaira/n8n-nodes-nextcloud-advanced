@@ -38,14 +38,17 @@ class ExcelMultiSheetEditor {
         {
           displayName: 'Sheet Name',
           name: 'sheetName',
-          type: 'string',
-          default: 'Sheet1',
+          type: 'options',
+          typeOptions: {
+            loadOptionsMethod: 'getSheetNames',
+          },
+          default: '',
           displayOptions: {
             hide: {
               operation: ['listSheets'],
             },
           },
-          description: 'Sheet name to read from or write to',
+          description: 'Choose an existing sheet or type a new name to create one',
         },
         {
           displayName: 'Output File Name',
@@ -113,21 +116,18 @@ class ExcelMultiSheetEditor {
               name: 'includeEmpty',
               type: 'boolean',
               default: false,
-              description: 'Whether to include empty cells in the output',
             },
             {
               displayName: 'First Row as Headers',
               name: 'firstRowHeaders',
               type: 'boolean',
               default: false,
-              description: 'Use first row as column headers (returns array of objects)',
             },
             {
               displayName: 'Max Rows',
               name: 'maxRows',
               type: 'number',
               default: 0,
-              description: 'Maximum number of rows to read. 0 = all rows',
             },
           ],
         },
@@ -164,6 +164,49 @@ class ExcelMultiSheetEditor {
       ],
     };
   }
+
+  // 🔧 Dynamic sheet name loader
+  methods = {
+    loadOptions: {
+      async getSheetNames() {
+        const items = this.getInputData();
+        
+        if (!items || items.length === 0) {
+          return [{ name: 'Sheet1', value: 'Sheet1' }];
+        }
+
+        try {
+          const binaryPropertyName = this.getNodeParameter('binaryPropertyName', 0);
+          
+          if (items[0].binary && items[0].binary[binaryPropertyName]) {
+            const workbook = new ExcelJS.Workbook();
+            const binaryData = await this.helpers.getBinaryDataBuffer(0, binaryPropertyName);
+            await workbook.xlsx.load(binaryData);
+            
+            const sheets = workbook.worksheets.map(ws => ({
+              name: ws.name,
+              value: ws.name,
+            }));
+            
+            // Add option to create new sheet
+            sheets.push({
+              name: '➕ Create new sheet...',
+              value: '__new__',
+            });
+            
+            return sheets;
+          }
+        } catch (error) {
+          // Fall through to defaults
+        }
+
+        return [
+          { name: 'Sheet1', value: 'Sheet1' },
+          { name: '➕ Create new sheet...', value: '__new__' },
+        ];
+      },
+    },
+  };
 
   async execute() {
     const items = this.getInputData();
@@ -210,7 +253,11 @@ class ExcelMultiSheetEditor {
           continue;
         }
 
-        const sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
+        // 🔧 Get sheet name - handle "__new__" for creating new sheets
+        let sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
+        if (sheetName === '__new__') {
+          sheetName = `Sheet${workbook.worksheets.length + 1}`;
+        }
 
         // ==========================================
         // OPERATION: READ SHEET
@@ -228,7 +275,6 @@ class ExcelMultiSheetEditor {
           const maxRows = readOptions.maxRows > 0 ? Math.min(readOptions.maxRows, rowCount) : rowCount;
 
           if (readOptions.firstRowHeaders && rowCount > 0) {
-            // Read first row as headers
             const headerRow = worksheet.getRow(1);
             const headers = [];
             
@@ -236,7 +282,6 @@ class ExcelMultiSheetEditor {
               headers[colNumber] = cell.value !== null && cell.value !== undefined ? String(cell.value) : `Column${colNumber}`;
             });
 
-            // Read data rows
             for (let rowIdx = 2; rowIdx <= maxRows; rowIdx++) {
               const row = worksheet.getRow(rowIdx);
               const rowData = {};
@@ -252,7 +297,6 @@ class ExcelMultiSheetEditor {
               }
             }
           } else {
-            // Read as array of arrays
             for (let rowIdx = 1; rowIdx <= maxRows; rowIdx++) {
               const row = worksheet.getRow(rowIdx);
               const rowData = [];
