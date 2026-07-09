@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-nextcloud-advanced",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "n8n community node for Excel multi-sheet editing",
   "keywords": [
     "n8n-community-node-package",
