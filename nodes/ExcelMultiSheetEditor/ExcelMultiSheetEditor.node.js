@@ -31,16 +31,22 @@ class ExcelMultiSheetEditor {
           name: 'binaryPropertyName',
           type: 'string',
           default: 'data',
+          description: 'Name of the binary property containing the Excel file',
         },
         {
           displayName: 'Sheet Name',
           name: 'sheetName',
-          type: 'options',
-          typeOptions: {
-            loadOptionsMethod: 'getSheetNames',
-          },
+          type: 'string',
+          default: 'Sheet1',
+          description: 'Sheet name to edit. Will be created if it does not exist.',
+        },
+        {
+          displayName: 'Output File Name',
+          name: 'outputFileName',
+          type: 'string',
           default: '',
-          description: 'Choose sheet or leave empty for first sheet. Type custom name to create new.',
+          placeholder: 'Leave empty to keep original name',
+          description: 'Custom file name for the output Excel file. Leave empty to keep original name.',
         },
         {
           displayName: 'Start Cell',
@@ -114,19 +120,6 @@ class ExcelMultiSheetEditor {
     };
   }
 
-  methods = {
-    loadOptions: {
-      async getSheetNames() {
-        return [
-          { name: '[First sheet / Create new]', value: '' },
-          { name: 'Sheet1', value: 'Sheet1' },
-          { name: 'Sheet2', value: 'Sheet2' },
-          { name: 'Sheet3', value: 'Sheet3' },
-        ];
-      },
-    },
-  };
-
   async execute() {
     const items = this.getInputData();
     const returnData = [];
@@ -134,6 +127,8 @@ class ExcelMultiSheetEditor {
     for (let i = 0; i < items.length; i++) {
       try {
         const operation = this.getNodeParameter('operation', i);
+        const sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
+        const outputFileName = this.getNodeParameter('outputFileName', i);
         const dataFormat = this.getNodeParameter('dataFormat', i);
         const targetColumnsStr = this.getNodeParameter('targetColumns', i);
         const options = this.getNodeParameter('options', i, {});
@@ -141,7 +136,7 @@ class ExcelMultiSheetEditor {
         // Parse target columns
         let targetColumns = [];
         if (targetColumnsStr && targetColumnsStr.trim()) {
-          targetColumns = targetColumnsStr.split(',').map(c => c.trim().toUpperCase());
+          targetColumns = targetColumnsStr.split(',').map(col => col.trim().toUpperCase());
         }
 
         // Get data
@@ -170,21 +165,18 @@ class ExcelMultiSheetEditor {
 
         // Load workbook
         let workbook;
+        let originalFileName = 'workbook.xlsx';
         const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i);
 
         if (items[i].binary && binaryPropertyName && items[i].binary[binaryPropertyName]) {
           const binaryData = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
           workbook = XLSX.read(binaryData, { type: 'buffer' });
+          // 🔧 Get original filename
+          if (items[i].binary[binaryPropertyName].fileName) {
+            originalFileName = items[i].binary[binaryPropertyName].fileName;
+          }
         } else {
           workbook = XLSX.utils.book_new();
-        }
-
-        // Determine sheet name
-        let sheetName = this.getNodeParameter('sheetName', i) || '';
-        if (!sheetName && workbook.SheetNames.length > 0) {
-          sheetName = workbook.SheetNames[0];
-        } else if (!sheetName) {
-          sheetName = 'Sheet1';
         }
 
         // Get or create worksheet
@@ -194,24 +186,16 @@ class ExcelMultiSheetEditor {
           XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
         }
 
-        // Get current data range
+        // 🔧 Get current data range
         const currentData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         
-        // 🔧 PRESERVE STYLES: Save original cell objects
-        const originalCells = {};
-        Object.keys(worksheet).forEach(ref => {
-          if (!ref.startsWith('!')) {
-            originalCells[ref] = JSON.parse(JSON.stringify(worksheet[ref]));
-          }
-        });
-
-        // Determine start row
+        // Determine start position
         let startRow = currentData.length;
         let startCol = 0;
 
         if (options.appendEmptyRow && startRow > 0) {
           const lastRow = currentData[startRow - 1];
-          if (lastRow.some(c => c !== '' && c !== null && c !== undefined)) {
+          if (lastRow.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
             startRow++;
           }
         }
@@ -223,56 +207,69 @@ class ExcelMultiSheetEditor {
           startCol = startRef.c;
         }
 
-        // 🔧 ADD DATA DIRECTLY to cells (preserves other cells' styles)
+        // 🔧 WRITE DIRECTLY TO CELLS - preserves existing cells
+        let maxColUsed = startCol;
+        let maxRowUsed = startRow;
+
         for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
           const row = dataToInsert[rowIdx];
+          
           for (let colIdx = 0; colIdx < row.length; colIdx++) {
-            const col = targetColumns.length > 0 && colIdx < targetColumns.length
+            const targetCol = targetColumns.length > 0 && colIdx < targetColumns.length
               ? parseColumnIndex(targetColumns[colIdx])
               : startCol + colIdx;
 
-            const cellRef = XLSX.utils.encode_cell({ r: startRow + rowIdx, c: col });
+            const cellRef = XLSX.utils.encode_cell({ r: startRow + rowIdx, c: targetCol });
             
             // Check overwrite
             if (operation === 'addRange' && !options.overwrite) {
-              const existing = worksheet[cellRef];
-              if (existing && existing.v !== undefined && existing.v !== '') continue;
+              const existingCell = worksheet[cellRef];
+              if (existingCell && existingCell.v !== undefined && existingCell.v !== '') continue;
             }
 
-            // 🔧 Create new cell value
+            // Write new value - 🔧 keep existing formatting if cell exists
             const value = row[colIdx];
+            const existingCell = worksheet[cellRef];
+            
             worksheet[cellRef] = {
               v: value,
               t: typeof value === 'number' ? 'n' : 's',
             };
+
+            // 🔧 Preserve existing cell style
+            if (existingCell && existingCell.s) {
+              worksheet[cellRef].s = existingCell.s;
+            }
+            if (existingCell && existingCell.z) {
+              worksheet[cellRef].z = existingCell.z;
+            }
+
+            if (targetCol > maxColUsed) maxColUsed = targetCol;
+            if (startRow + rowIdx > maxRowUsed) maxRowUsed = startRow + rowIdx;
           }
         }
 
-        // 🔧 RESTORE ORIGINAL CELLS that we didn't modify (preserves their styles)
-        Object.keys(originalCells).forEach(ref => {
-          if (!worksheet[ref]) {
-            worksheet[ref] = originalCells[ref];
-          }
-        });
-
         // Update range
-        const maxRow = startRow + dataToInsert.length - 1;
-        const maxCol = targetColumns.length > 0
-          ? Math.max(...targetColumns.map(c => parseColumnIndex(c)))
-          : startCol + Math.max(...dataToInsert.map(r => r.length)) - 1;
-
-        const oldRange = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+        const oldRange = worksheet['!ref'] 
+          ? XLSX.utils.decode_range(worksheet['!ref']) 
+          : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
         
         worksheet['!ref'] = XLSX.utils.encode_range({
           s: { r: Math.min(oldRange.s.r, startRow), c: Math.min(oldRange.s.c, startCol) },
-          e: { r: Math.max(oldRange.e.r, maxRow), c: Math.max(oldRange.e.c, maxCol) },
+          e: { r: Math.max(oldRange.e.r, maxRowUsed), c: Math.max(oldRange.e.c, maxColUsed) },
         });
 
         workbook.Sheets[sheetName] = worksheet;
 
-        // Write
+        // Write to buffer
         const wbout = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
+        // 🔧 Determine output filename
+        const finalFileName = outputFileName 
+          ? (outputFileName.endsWith('.xlsx') ? outputFileName : `${outputFileName}.xlsx`)
+          : originalFileName;
+
+        // Prepare output
         const outputBinaryField = options.outputBinaryField || binaryPropertyName || 'data';
         const newItem = {
           json: {
@@ -281,21 +278,24 @@ class ExcelMultiSheetEditor {
             sheetModified: sheetName,
             rowsAffected: dataToInsert.length,
             sheetNames: workbook.SheetNames,
+            outputFileName: finalFileName,
           },
           binary: {},
         };
 
         newItem.binary[outputBinaryField] = await this.helpers.prepareBinaryData(
           wbout,
-          `edited_${sheetName}_${Date.now()}.xlsx`,
+          finalFileName,
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         );
 
         returnData.push(newItem);
       } catch (error) {
-        const msg = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (this.continueOnFail()) {
-          returnData.push({ json: { error: msg, ...items[i].json } });
+          returnData.push({
+            json: { error: errorMessage, ...items[i].json },
+          });
           continue;
         }
         throw error;
@@ -309,7 +309,9 @@ class ExcelMultiSheetEditor {
 function parseColumnIndex(col) {
   if (/^[A-Z]+$/.test(col)) {
     let idx = 0;
-    for (let i = 0; i < col.length; i++) idx = idx * 26 + (col.charCodeAt(i) - 64);
+    for (let i = 0; i < col.length; i++) {
+      idx = idx * 26 + (col.charCodeAt(i) - 64);
+    }
     return idx - 1;
   }
   return parseInt(col) - 1;
