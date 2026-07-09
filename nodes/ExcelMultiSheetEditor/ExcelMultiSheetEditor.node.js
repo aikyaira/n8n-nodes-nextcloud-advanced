@@ -9,10 +9,11 @@ class ExcelMultiSheetEditor {
       name: 'excelMultiSheetEditor',
       group: ['transform'],
       version: 2,
-      description: 'Edit multi-sheet Excel files - read, write, list sheets with full style preservation',
+      description: 'Edit multi-sheet Excel files - read, write, list sheets with full style and formula preservation',
       defaults: {
         name: 'Excel Multi-Sheet Editor',
       },
+      icon: 'file:excel.svg',
       inputs: ['main'],
       outputs: ['main'],
       properties: [
@@ -91,6 +92,7 @@ class ExcelMultiSheetEditor {
           type: 'json',
           default: '[\n  ["Name", "Age", "City"],\n  ["John", 30, "New York"],\n  ["Jane", 25, "London"]\n]',
           displayOptions: { show: { dataFormat: ['defineBelow'], operation: ['addRows', 'addRange'] } },
+          description: 'Array of arrays. Use strings starting with = for formulas (e.g., "=SUM(A1:A10)")',
         },
         {
           displayName: 'Target Columns',
@@ -113,18 +115,21 @@ class ExcelMultiSheetEditor {
               name: 'includeEmpty',
               type: 'boolean',
               default: false,
+              description: 'Whether to include empty cells in the output',
             },
             {
               displayName: 'First Row as Headers',
               name: 'firstRowHeaders',
               type: 'boolean',
               default: false,
+              description: 'Use first row as column headers (returns array of objects)',
             },
             {
               displayName: 'Max Rows',
               name: 'maxRows',
               type: 'number',
               default: 0,
+              description: 'Maximum number of rows to read. 0 = all rows',
             },
           ],
         },
@@ -142,6 +147,7 @@ class ExcelMultiSheetEditor {
               type: 'boolean',
               default: false,
               displayOptions: { show: { '/operation': ['addRange'] } },
+              description: 'Whether to overwrite existing data in the range',
             },
             {
               displayName: 'Add Empty Row Before',
@@ -149,12 +155,14 @@ class ExcelMultiSheetEditor {
               type: 'boolean',
               default: false,
               displayOptions: { show: { '/operation': ['addRows'] } },
+              description: 'Add an empty row before new data',
             },
             {
               displayName: 'Output Binary Field',
               name: 'outputBinaryField',
               type: 'string',
               default: 'data',
+              description: 'Name of the binary field to output',
             },
           ],
         },
@@ -239,7 +247,12 @@ class ExcelMultiSheetEditor {
               
               row.eachCell({ includeEmpty: readOptions.includeEmpty }, (cell, colNumber) => {
                 if (headers[colNumber]) {
-                  rowData[headers[colNumber]] = cell.value;
+                  // 🔧 Handle formulas - return formula string for formula cells
+                  if (cell.formula) {
+                    rowData[headers[colNumber]] = `=${cell.formula}`;
+                  } else {
+                    rowData[headers[colNumber]] = cell.value;
+                  }
                 }
               });
               
@@ -253,7 +266,12 @@ class ExcelMultiSheetEditor {
               const rowData = [];
               
               row.eachCell({ includeEmpty: readOptions.includeEmpty }, (cell, colNumber) => {
-                rowData[colNumber - 1] = cell.value;
+                // 🔧 Handle formulas
+                if (cell.formula) {
+                  rowData[colNumber - 1] = `=${cell.formula}`;
+                } else {
+                  rowData[colNumber - 1] = cell.value;
+                }
               });
               
               if (rowData.length > 0 || readOptions.includeEmpty) {
@@ -283,11 +301,13 @@ class ExcelMultiSheetEditor {
         const targetColumnsStr = this.getNodeParameter('targetColumns', i);
         const options = this.getNodeParameter('options', i, {});
 
+        // Parse target columns
         let targetColumns = [];
         if (targetColumnsStr && targetColumnsStr.trim()) {
           targetColumns = targetColumnsStr.split(',').map(col => col.trim().toUpperCase());
         }
 
+        // Get data to insert
         let dataToInsert;
         if (dataFormat === 'defineBelow') {
           dataToInsert = this.getNodeParameter('dataToAdd', i);
@@ -311,11 +331,13 @@ class ExcelMultiSheetEditor {
           return [row];
         });
 
+        // Get or create worksheet
         let worksheet = workbook.getWorksheet(sheetName);
         if (!worksheet) {
           worksheet = workbook.addWorksheet(sheetName);
         }
 
+        // Determine start position
         let startRow;
         let startCol = 1;
 
@@ -335,6 +357,7 @@ class ExcelMultiSheetEditor {
           startCol = parsed.col;
         }
 
+        // 🔧 Add data with formula support
         for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
           const row = dataToInsert[rowIdx];
           const targetRow = worksheet.getRow(startRow + rowIdx);
@@ -351,18 +374,31 @@ class ExcelMultiSheetEditor {
               }
             }
 
-            targetRow.getCell(targetCol).value = row[colIdx];
+            const cellValue = row[colIdx];
+            const cell = targetRow.getCell(targetCol);
+
+            // 🔧 FORMULA DETECTION: Check if value is a formula (starts with =)
+            if (typeof cellValue === 'string' && cellValue.startsWith('=')) {
+              // It's a formula - set as formula type
+              cell.value = { formula: cellValue.substring(1) };
+            } else {
+              // Regular value
+              cell.value = cellValue;
+            }
           }
 
           targetRow.commit();
         }
 
+        // Write to buffer
         const buffer = await workbook.xlsx.writeBuffer();
 
+        // Determine output filename
         const finalFileName = outputFileName 
           ? (outputFileName.endsWith('.xlsx') ? outputFileName : `${outputFileName}.xlsx`)
           : originalFileName;
 
+        // Prepare output
         const outputBinaryField = options.outputBinaryField || binaryPropertyName || 'data';
         
         returnData.push({
