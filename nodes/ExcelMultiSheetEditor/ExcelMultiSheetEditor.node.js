@@ -168,16 +168,25 @@ class ExcelMultiSheetEditor {
           dataToInsert = this.getNodeParameter(jsonProperty, i);
         }
 
-        // Validate data
-        if (!Array.isArray(dataToInsert)) {
-          throw new Error('Data must be an array of arrays');
+        // 🔧 FIX: Parse JSON string if needed (n8n passes JSON as string)
+        if (typeof dataToInsert === 'string') {
+          try {
+            dataToInsert = JSON.parse(dataToInsert);
+          } catch (parseError) {
+            throw new Error(`Failed to parse data as JSON. Make sure it's valid JSON array. Error: ${parseError.message}`);
+          }
         }
 
-        // Normalize data
-        dataToInsert = dataToInsert.map(row => {
+        // 🔧 FIX: Better validation with detailed error
+        if (!Array.isArray(dataToInsert)) {
+          throw new Error(`Data must be an array of arrays. Received type: ${typeof dataToInsert}. Value: ${JSON.stringify(dataToInsert).substring(0, 100)}`);
+        }
+
+        // Normalize data - convert objects to arrays if needed
+        dataToInsert = dataToInsert.map((row, index) => {
           if (Array.isArray(row)) return row;
           if (typeof row === 'object' && row !== null) return Object.values(row);
-          return [row];
+          throw new Error(`Row ${index} must be an array or object. Received: ${typeof row}`);
         });
 
         // Load or create workbook
@@ -269,6 +278,7 @@ function addRowsToEnd(worksheet, dataToInsert, appendEmptyRow) {
   const newData = [...currentData, ...dataToInsert];
   const newWorksheet = XLSX.utils.aoa_to_sheet(newData);
 
+  // Clear old worksheet and copy new data
   Object.keys(worksheet).forEach(key => delete worksheet[key]);
   Object.assign(worksheet, newWorksheet);
 }
