@@ -38,17 +38,14 @@ class ExcelMultiSheetEditor {
         {
           displayName: 'Sheet Name',
           name: 'sheetName',
-          type: 'options',
-          typeOptions: {
-            loadOptionsMethod: 'getSheetNames',
-          },
-          default: '',
+          type: 'string',
+          default: 'Sheet1',
           displayOptions: {
             hide: {
               operation: ['listSheets'],
             },
           },
-          description: 'Choose an existing sheet or type a new name to create one',
+          description: 'Sheet name to read/write. Tip: Use "List Sheets" operation first to see available sheets.',
         },
         {
           displayName: 'Output File Name',
@@ -165,49 +162,6 @@ class ExcelMultiSheetEditor {
     };
   }
 
-  // 🔧 Dynamic sheet name loader
-  methods = {
-    loadOptions: {
-      async getSheetNames() {
-        const items = this.getInputData();
-        
-        if (!items || items.length === 0) {
-          return [{ name: 'Sheet1', value: 'Sheet1' }];
-        }
-
-        try {
-          const binaryPropertyName = this.getNodeParameter('binaryPropertyName', 0);
-          
-          if (items[0].binary && items[0].binary[binaryPropertyName]) {
-            const workbook = new ExcelJS.Workbook();
-            const binaryData = await this.helpers.getBinaryDataBuffer(0, binaryPropertyName);
-            await workbook.xlsx.load(binaryData);
-            
-            const sheets = workbook.worksheets.map(ws => ({
-              name: ws.name,
-              value: ws.name,
-            }));
-            
-            // Add option to create new sheet
-            sheets.push({
-              name: '➕ Create new sheet...',
-              value: '__new__',
-            });
-            
-            return sheets;
-          }
-        } catch (error) {
-          // Fall through to defaults
-        }
-
-        return [
-          { name: 'Sheet1', value: 'Sheet1' },
-          { name: '➕ Create new sheet...', value: '__new__' },
-        ];
-      },
-    },
-  };
-
   async execute() {
     const items = this.getInputData();
     const returnData = [];
@@ -253,11 +207,7 @@ class ExcelMultiSheetEditor {
           continue;
         }
 
-        // 🔧 Get sheet name - handle "__new__" for creating new sheets
-        let sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
-        if (sheetName === '__new__') {
-          sheetName = `Sheet${workbook.worksheets.length + 1}`;
-        }
+        const sheetName = this.getNodeParameter('sheetName', i) || 'Sheet1';
 
         // ==========================================
         // OPERATION: READ SHEET
@@ -267,7 +217,8 @@ class ExcelMultiSheetEditor {
           const readOptions = this.getNodeParameter('readOptions', i, {});
           
           if (!worksheet) {
-            throw new Error(`Sheet "${sheetName}" not found. Available sheets: ${workbook.worksheets.map(ws => ws.name).join(', ')}`);
+            const available = workbook.worksheets.map(ws => ws.name).join(', ');
+            throw new Error(`Sheet "${sheetName}" not found. Available sheets: ${available}`);
           }
 
           const data = [];
@@ -332,13 +283,11 @@ class ExcelMultiSheetEditor {
         const targetColumnsStr = this.getNodeParameter('targetColumns', i);
         const options = this.getNodeParameter('options', i, {});
 
-        // Parse target columns
         let targetColumns = [];
         if (targetColumnsStr && targetColumnsStr.trim()) {
           targetColumns = targetColumnsStr.split(',').map(col => col.trim().toUpperCase());
         }
 
-        // Get data
         let dataToInsert;
         if (dataFormat === 'defineBelow') {
           dataToInsert = this.getNodeParameter('dataToAdd', i);
@@ -362,13 +311,11 @@ class ExcelMultiSheetEditor {
           return [row];
         });
 
-        // Get or create worksheet
         let worksheet = workbook.getWorksheet(sheetName);
         if (!worksheet) {
           worksheet = workbook.addWorksheet(sheetName);
         }
 
-        // Determine start position
         let startRow;
         let startCol = 1;
 
@@ -388,7 +335,6 @@ class ExcelMultiSheetEditor {
           startCol = parsed.col;
         }
 
-        // Add data
         for (let rowIdx = 0; rowIdx < dataToInsert.length; rowIdx++) {
           const row = dataToInsert[rowIdx];
           const targetRow = worksheet.getRow(startRow + rowIdx);
@@ -411,15 +357,12 @@ class ExcelMultiSheetEditor {
           targetRow.commit();
         }
 
-        // Write to buffer
         const buffer = await workbook.xlsx.writeBuffer();
 
-        // Determine output filename
         const finalFileName = outputFileName 
           ? (outputFileName.endsWith('.xlsx') ? outputFileName : `${outputFileName}.xlsx`)
           : originalFileName;
 
-        // Prepare output
         const outputBinaryField = options.outputBinaryField || binaryPropertyName || 'data';
         
         returnData.push({
